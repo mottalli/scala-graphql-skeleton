@@ -16,6 +16,7 @@ import sangria.marshalling.circe._
 import sangria.macros.derive._
 import sangria.schema._
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
+import sangria.execution.Executor
 
 import scala.concurrent.ExecutionContext
 import scala.util.control.NonFatal
@@ -49,7 +50,10 @@ object GraphQLSchema {
 }
 
 class GraphQLServer extends LazyLogging {
-  private def executeGraphQLQuery(query: Document, operation: Option[String], variables: Json) = ???
+  private def executeGraphQLQuery(query: Document, operation: Option[String], variables: Json)(
+    implicit ec: ExecutionContext
+  ) =
+    Executor.execute(GraphQLSchema.schema, query, new FooRepository, variables = variables, operationName = operation)
 
   def formatError(error: Throwable): Json = error match {
     case syntaxError: SyntaxError ⇒
@@ -75,24 +79,25 @@ class GraphQLServer extends LazyLogging {
   private def formatError(message: String): Json =
     Json.obj("errors" -> Json.arr(Json.obj("message" -> Json.fromString(message))))
 
-  val endpoint: Route = post {
-    entity(as[Json]) { requestJson =>
-      val queryOpt: Option[String] = root.selectDynamic("query").string.getOption(requestJson)
+  def endpoint(implicit ec: ExecutionContext): Route =
+    post {
+      entity(as[Json]) { requestJson =>
+        val queryOpt: Option[String] = root.selectDynamic("query").string.getOption(requestJson)
 
-      queryOpt match {
-        case None => complete(StatusCodes.BadRequest, formatError("No GraphQL query to execute"))
-        case Some(query) =>
-          QueryParser.parse(query) match {
-            case Failure(error) => complete(StatusCodes.BadRequest, formatError(error))
-            case Success(queryAst) =>
-              val operationName: Option[String] = root.selectDynamic("operationName").string.getOption(requestJson)
-              val variables: Json = root.selectDynamic("variables").json.getOption(requestJson).getOrElse(Json.obj())
-              complete(executeGraphQLQuery(queryAst, operationName, variables))
-          }
+        queryOpt match {
+          case None => complete(StatusCodes.BadRequest, formatError("No GraphQL query to execute"))
+          case Some(query) =>
+            QueryParser.parse(query) match {
+              case Failure(error) => complete(StatusCodes.BadRequest, formatError(error))
+              case Success(queryAst) =>
+                val operationName: Option[String] = root.selectDynamic("operationName").string.getOption(requestJson)
+                val variables: Json = root.selectDynamic("variables").json.getOption(requestJson).getOrElse(Json.obj())
+                complete(executeGraphQLQuery(queryAst, operationName, variables))
+            }
+        }
       }
-    }
-  } ~
-    get { getFromResource("playground.html") }
+    } ~
+      get { getFromResource("playground.html") }
 }
 
 class Server(settings: Settings) extends LazyLogging {
