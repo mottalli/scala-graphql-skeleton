@@ -14,6 +14,7 @@ import sangria.parser.{QueryParser, SyntaxError}
 import sangria.ast.Document
 import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
 
+import scala.concurrent.ExecutionContext
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success}
 
@@ -21,15 +22,8 @@ class Settings {
   val port: Int = 8080
 }
 
-/*
-class GraphQLEndpoint extends LazyLogging {
-  val endpoint: Route =
-}
- */
-
-class Server(settings: Settings) extends LazyLogging {
-  def formatError(message: String): Json =
-    Json.obj("errors" → Json.arr(Json.obj("message" → Json.fromString(message))))
+class GraphQLServer extends LazyLogging {
+  private def executeGraphQLQuery(query: Document, operation: Option[String], variables: Json) = ???
 
   def formatError(error: Throwable): Json = error match {
     case syntaxError: SyntaxError ⇒
@@ -52,48 +46,47 @@ class Server(settings: Settings) extends LazyLogging {
       throw e
   }
 
-  def executeGraphQL(query: Document, operationName: Option[String], variables: Json): Route = ???
+  private def formatError(message: String): Json =
+    Json.obj("errors" -> Json.arr(Json.obj("message" -> Json.fromString(message))))
+
+  val endpoint: Route = post {
+    entity(as[Json]) { requestJson =>
+      val queryOpt: Option[String] = root.selectDynamic("query").string.getOption(requestJson)
+
+      queryOpt match {
+        case None => complete(StatusCodes.BadRequest, formatError("No GraphQL query to execute"))
+        case Some(query) =>
+          QueryParser.parse(query) match {
+            case Failure(error) => complete(StatusCodes.BadRequest, formatError(error))
+            case Success(queryAst) =>
+              val operationName: Option[String] = root.selectDynamic("operationName").string.getOption(requestJson)
+              val variables: Json = root.selectDynamic("variables").json.getOption(requestJson).getOrElse(Json.obj())
+              complete(executeGraphQLQuery(queryAst, operationName, variables))
+          }
+      }
+    }
+  } ~
+    get { getFromResource("playground.html") }
+}
+
+class Server(settings: Settings) extends LazyLogging {
+
+  implicit lazy val system: ActorSystem = ActorSystem("sangria-graphql-server")
+  implicit lazy val materializer: ActorMaterializer = ActorMaterializer()
+
+  import system.dispatcher
+
+  lazy val graphQLServer = new GraphQLServer
+
+  lazy val route: Route =
+    path("graphql") {
+      graphQLServer.endpoint
+    } ~
+      (get & pathEndOrSingleSlash) {
+        redirect("/graphql", StatusCodes.PermanentRedirect)
+      }
 
   def serve(): Unit = {
-    implicit val system: ActorSystem = ActorSystem("sangria-server")
-    implicit val materializer: ActorMaterializer = ActorMaterializer()
-
-    import system.dispatcher
-
-    val route: Route =
-      path("graphql") {
-        post {
-          parameters('query.?, 'operationName.?, 'variables.?) { (queryParam, operationNameParam, variablesParam) =>
-            entity(as[Json]) { body =>
-              def getFieldOpt(fieldName: String): Option[String] = root.selectDynamic(fieldName).string.getOption(body)
-
-              val query = queryParam.orElse(getFieldOpt("query"))
-              val operationName = operationNameParam.orElse(getFieldOpt("operationName"))
-              val variables = variablesParam.orElse(getFieldOpt("variables"))
-
-              query.map(QueryParser.parse(_)) match {
-                case None                 => complete(StatusCodes.BadRequest, formatError("No query to execute"))
-                case Some(Failure(error)) => complete(StatusCodes.BadRequest, formatError(error))
-                case Some(Success(ast)) =>
-                  variables.map(parse) match {
-                    case Some(Left(error)) => complete(StatusCodes.BadRequest, formatError(error))
-                    case Some(Right(json)) => executeGraphQL(ast, operationName, json)
-                    case None =>
-                      val variablesJson = root.selectDynamic("variables").json.getOption(body).getOrElse(Json.obj())
-                      executeGraphQL(ast, operationName, variablesJson)
-                  }
-              }
-            }
-          }
-        }
-      } ~
-        get {
-          getFromResource("playground.html")
-        } ~
-        (get & pathEndOrSingleSlash) {
-          redirect("/graphql", StatusCodes.PermanentRedirect)
-        }
-
     Http().bindAndHandle(route, "0.0.0.0", settings.port)
   }
 }
