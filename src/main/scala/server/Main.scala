@@ -1,26 +1,7 @@
 package server
 
-import akka.actor.ActorSystem
-import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.StatusCodes
-import akka.http.scaladsl.server.Route
-import akka.http.scaladsl.server.Directives._
-import akka.stream.ActorMaterializer
-import com.typesafe.scalalogging.LazyLogging
-import io.circe._
-import io.circe.optics.JsonPath._
-import io.circe.parser._
-import sangria.parser.{QueryParser, SyntaxError}
-import sangria.ast.Document
-import sangria.marshalling.circe._
 import sangria.macros.derive._
 import sangria.schema._
-import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport._
-import sangria.execution.Executor
-
-import scala.concurrent.ExecutionContext
-import scala.util.control.NonFatal
-import scala.util.{Failure, Success}
 
 class Settings {
   val port: Int = 8080
