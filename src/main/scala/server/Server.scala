@@ -24,6 +24,12 @@ class Server[Ctx](settings: Settings, graphQLServer: GraphQLServer[Ctx]) extends
       }
 
   def serve(): Unit = {
-    Http().bindAndHandle(route, "0.0.0.0", settings.port)
+    val bindF = Http().bindAndHandle(route, "0.0.0.0", settings.port)
+
+    logger.info(s"Started server at http://localhost:${settings.port}. Press <enter> to terminate.")
+    scala.io.StdIn.readLine()
+    bindF
+      .flatMap(_.unbind())
+      .onComplete(_ => system.terminate())
   }
 }
